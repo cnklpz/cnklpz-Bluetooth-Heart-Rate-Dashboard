@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Heart Rate Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/js/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <style>
+        .ecg-grid {
+            background-image: 
+                linear-gradient(#ffe6e6 1px, transparent 1px),
+                linear-gradient(90deg, #ffe6e6 1px, transparent 1px);
+            background-size: 20px 20px;
+            background-position: -1px -1px;
+        }
+        .dark .ecg-grid {
+            background-image: 
+                linear-gradient(#334155 1px, transparent 1px),
+                linear-gradient(90deg, #334155 1px, transparent 1px);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 min-h-screen flex flex-col transition-colors duration-200">
+
+    <!-- Header -->
+    <header class="bg-white dark:bg-slate-800 shadow-sm py-4 transition-colors duration-200">
+        <div class="container mx-auto px-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
+                </svg>
+                <span data-i18n="title">Heart Rate Monitor</span>
+            </h1>
+            <div class="flex items-center gap-4">
+                <div id="status" class="text-sm text-slate-500 dark:text-slate-400 hidden md:block" data-i18n="status_disconnected">Disconnected</div>
+                
+                <!-- Settings -->
+                <div class="flex gap-3 relative z-50">
+                    <div id="langSelectWrapper" class="w-36"></div>
+                    <div id="themeSelectWrapper" class="w-36"></div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow container mx-auto px-4 py-8 space-y-6">
+        
+        <!-- Controls -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm p-6 border border-slate-100 dark:border-slate-700 transition-colors duration-200">
+            <div class="flex flex-col md:flex-row gap-4 items-center">
+                <button id="scanBtn" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm" data-i18n="btn_scan">
+                    Scan Devices
+                </button>
+                <div id="deviceSelectWrapper" class="flex-grow relative z-40"></div>
+                <button id="connectBtn" class="px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm" disabled data-i18n="btn_connect">
+                    Connect
+                </button>
+                <button id="disconnectBtn" class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm hidden" data-i18n="btn_disconnect">
+                    Disconnect
+                </button>
+            </div>
+        </div>
+
+        <!-- Dashboard -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Real-time BPM -->
+            <div class="lg:col-span-1 bg-white dark:bg-slate-800 rounded-xl shadow-sm p-6 border border-slate-100 dark:border-slate-700 flex flex-col justify-center items-center relative overflow-hidden transition-colors duration-200">
+                <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-400 to-pink-500"></div>
+                <h2 class="text-slate-400 dark:text-slate-500 font-medium uppercase tracking-wider text-sm mb-2" data-i18n="label_current_hr">Current Heart Rate</h2>
+                <div class="flex items-baseline gap-2">
+                    <span id="bpmValue" class="text-8xl font-black text-slate-800 dark:text-slate-100 tabular-nums">--</span>
+                    <span class="text-xl text-slate-400 font-medium" data-i18n="unit_bpm">BPM</span>
+                </div>
+                <div id="bpmAnimation" class="mt-4 h-8 w-8 bg-red-500 rounded-full opacity-0 transition-opacity duration-75"></div>
+            </div>
+
+            <!-- ECG Simulation -->
+            <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-200">
+                <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-700/50">
+                    <h2 class="text-slate-700 dark:text-slate-200 font-semibold" data-i18n="label_ecg">Live ECG Simulation</h2>
+                    <span class="text-xs text-slate-400 dark:text-slate-500 bg-white dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-600">25mm/s 10mm/mV</span>
+                </div>
+                <div class="relative h-64 w-full ecg-grid bg-white dark:bg-slate-800 transition-colors duration-200">
+                    <canvas id="ecgCanvas" class="w-full h-full"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Chart -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm p-6 border border-slate-100 dark:border-slate-700 transition-colors duration-200">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4">
+                <h2 class="text-slate-700 dark:text-slate-200 font-semibold" data-i18n="label_history">Heart Rate History</h2>
+                <div class="w-48 mt-2 md:mt-0 z-30 relative">
+                    <div id="historyPeriodSelectWrapper"></div>
+                </div>
+            </div>
+            <div class="h-64 w-full">
+                <canvas id="historyChart"></canvas>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- i18n Data ---
+        const translations = {
+            'en': {
+                'title': 'Heart Rate Monitor',
+                'status_disconnected': 'Disconnected',
+                'status_connected': 'Connected',
+                'status_connecting': 'Connecting...',
+                'btn_scan': 'Scan Devices',
+                'select_device': 'Select a device...',
+                'btn_connect': 'Connect',
+                'btn_disconnect': 'Disconnect',
+                'label_current_hr': 'Current Heart Rate',
+                'unit_bpm': 'BPM',
+                'label_ecg': 'Live ECG Simulation',
+                'label_history': 'Heart Rate History',
+                'lang_auto': 'Auto (Lang)',
+                'theme_auto': 'Auto (Theme)',
+                'theme_light': 'Light',
+                'theme_dark': 'Dark',
+                'period_minute': 'Recent (Raw)',
+                'period_minute_avg': 'Minute (Avg)',
+                'period_hour': 'Hour (Avg)',
+                'period_day': 'Day (Avg)',
+                'scan_scanning': 'Scanning...',
+                'scan_failed': 'Scan failed',
+                'conn_lost': 'Connection lost. Reconnecting...',
+                'error_prefix': 'Error: '
+            },
+            'zh-CN': {
+                'title': '心率监测器',
+                'status_disconnected': '未连接',
+                'status_connected': '已连接',
+                'status_connecting': '连接中...',
+                'btn_scan': '扫描设备',
+                'select_device': '选择设备...',
+                'btn_connect': '连接',
+                'btn_disconnect': '断开连接',
+                'label_current_hr': '实时心率',
+                'unit_bpm': 'BPM',
+                'label_ecg': '实时心电图模拟',
+                'label_history': '心率历史记录',
+                'lang_auto': '自动 (语言)',
+                'theme_auto': '自动 (主题)',
+                'theme_light': '浅色',
+                'theme_dark': '深色',
+                'period_minute': '最近 (原始)',
+                'period_minute_avg': '分钟 (平均)',
+                'period_hour': '小时 (平均)',
+                'period_day': '天 (平均)',
+                'scan_scanning': '扫描中...',
+                'scan_failed': '扫描失败',
+                'conn_lost': '连接丢失。重新连接中...',
+                'error_prefix': '错误：'
+            },
+            'zh-TW': {
+                'title': '心率監測器',
+                'status_disconnected': '未連接',
+                'status_connected': '已連接',
+                'status_connecting': '連接中...',
+                'btn_scan': '掃描設備',
+                'select_device': '選擇設備...',
+                'btn_connect': '連接',
+                'btn_disconnect': '斷開連接',
+                'label_current_hr': '即時心率',
+                'unit_bpm': 'BPM',
+                'label_ecg': '即時心電圖模擬',
+                'label_history': '心率歷史記錄',
+                'lang_auto': '自動 (語言)',
+                'theme_auto': '自動 (主題)',
+                'theme_light': '淺色',
+                'theme_dark': '深色',
+                'period_minute': '最近 (原始)',
+                'period_minute_avg': '分鐘 (平均)',
+                'period_hour': '小時 (平均)',
+                'period_day': '天 (平均)',
+                'scan_scanning': '掃描中...',
+                'scan_failed': '掃描失敗',
+                'conn_lost': '連接丟失。重新連接中...',
+                'error_prefix': '錯誤：'
+            }
+        };
+
+        // --- State Management ---
+        const state = {
+            lang: localStorage.getItem('ble_lang') || 'auto',
+            theme: localStorage.getItem('ble_theme') || 'auto',
+            currentLang: 'en'
+        };
+
+        // --- UI Components ---
+        class CustomSelect {
+            constructor(containerId, options, initialValue, onChange) {
+                this.container = document.getElementById(containerId);
+                this.options = options; // [{value, label, i18nKey}]
+                this.value = initialValue;
+                this.onChange = onChange;
+                this.isOpen = false;
+                
+                this.render();
+                
+                // Close on click outside
+                document.addEventListener('click', (e) => {
+                    if (!this.container.contains(e.target)) {
+                        this.close();
+                    }
+                });
+            }
+
+            getLabel(option) {
+                if (option.i18nKey) {
+                    return getT(option.i18nKey);
+                }
+                return option.label || option.value;
+            }
+
+            toggle() {
+                this.isOpen = !this.isOpen;
+                this.updateOpenState();
+            }
+
+            close() {
+                this.isOpen = false;
+                this.updateOpenState();
+            }
+
+            updateOpenState() {
+                const list = this.container.querySelector('ul');
+                const btn = this.container.querySelector('button');
+                const chevron = btn.querySelector('svg');
+                if (this.isOpen) {
+                    list.classList.remove('hidden');
+                    chevron.classList.add('rotate-180');
+                    btn.classList.add('ring-2', 'ring-indigo-500', 'border-transparent');
+                } else {
+                    list.classList.add('hidden');
+                    chevron.classList.remove('rotate-180');
+                    btn.classList.remove('ring-2', 'ring-indigo-500', 'border-transparent');
+                }
+            }
+
+            select(value) {
+                this.value = value;
+                this.close();
+                this.renderButtonContent();
+                if (this.onChange) this.onChange(value);
+            }
+
+            getValue() {
+                return this.value;
+            }
+
+            renderButtonContent() {
+                const btn = this.container.querySelector('button');
+                const selectedOption = this.options.find(o => o.value === this.value) || this.options[0] || {label: ''};
+                const span = btn.querySelector('.selected-text');
+                
+                if (selectedOption.i18nKey) {
+                    span.setAttribute('data-i18n', selectedOption.i18nKey);
+                    span.textContent = getT(selectedOption.i18nKey);
+                } else {
+                    span.removeAttribute('data-i18n');
+                    span.textContent = selectedOption.label || selectedOption.value;
+                }
+            }
+
+            setOptions(newOptions) {
+                this.options = newOptions;
+                this.renderOptions();
+                
+                // If current value is not in new options, check validity
+                const currentExists = this.options.find(o => o.value === this.value);
+                if (!currentExists) {
+                    // If not found, try to select first option if available, or keep empty
+                     if (this.options.length > 0) {
+                        // Don't auto-select here unless necessary, but for UI consistency let's just re-render button
+                        // If value is invalid, button might show nothing or fallback
+                     }
+                }
+                this.renderButtonContent();
+            }
+            
+            renderOptions() {
+                const list = this.container.querySelector('ul');
+                list.innerHTML = '';
+                this.options.forEach(opt => {
+                    const li = document.createElement('li');
+                    li.className = "text-slate-700 dark:text-slate-200 relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-indigo-50 dark:hover:bg-slate-600 transition-colors";
+                    
+                    const label = this.getLabel(opt);
+                    
+                    let content = `<span class="font-normal block truncate" ${opt.i18nKey ? `data-i18n="${opt.i18nKey}"` : ''}>${label}</span>`;
+                    
+                    if (opt.value === this.value) {
+                        content += `
+                            <span class="text-indigo-600 dark:text-indigo-400 absolute inset-y-0 right-0 flex items-center pr-4">
+                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                </svg>
+                            </span>
+                        `;
+                        li.classList.add('font-semibold', 'bg-slate-50', 'dark:bg-slate-700/50'); 
+                    }
+                    
+                    li.innerHTML = content;
+                    li.onclick = (e) => {
+                        e.stopPropagation();
+                        this.select(opt.value);
+                        // Re-render options to update checkmark
+                        this.renderOptions();
+                    };
+                    list.appendChild(li);
+                });
+            }
+
+            render() {
+                this.container.innerHTML = `
+                    <div class="relative w-full">
+                        <button type="button" class="relative w-full cursor-pointer rounded-lg bg-white dark:bg-slate-700 py-2 pl-3 pr-10 text-left border border-slate-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 hover:border-slate-300 dark:hover:border-slate-500 transition-colors shadow-sm sm:text-sm h-[38px] flex items-center">
+                            <span class="block truncate selected-text text-slate-700 dark:text-slate-200 w-full"></span>
+                            <span class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                <svg class="h-5 w-5 text-slate-400 transition-transform duration-200" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clip-rule="evenodd" />
+                                </svg>
+                            </span>
+                        </button>
+                        <ul class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white dark:bg-slate-700 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm hidden border border-slate-100 dark:border-slate-600">
+                        </ul>
+                    </div>
+                `;
+                
+                const btn = this.container.querySelector('button');
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    // Close other dropdowns if needed (optional)
+                    this.toggle();
+                };
+                
+                this.renderOptions();
+                this.renderButtonContent();
+            }
+        }
+
+        // --- Elements ---
+        const scanBtn = document.getElementById('scanBtn');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusDiv = document.getElementById('status');
+        const bpmValueSpan = document.getElementById('bpmValue');
+        const bpmAnimation = document.getElementById('bpmAnimation');
+        
+        // --- Custom Select Initialization ---
+        const langOptions = [
+            {value: 'auto', i18nKey: 'lang_auto'},
+            {value: 'en', label: 'English'},
+            {value: 'zh-CN', label: '简体中文'},
+            {value: 'zh-TW', label: '繁體中文'}
+        ];
+
+        const langSelect = new CustomSelect('langSelectWrapper', langOptions, state.lang, (val) => {
+            state.lang = val;
+            localStorage.setItem('ble_lang', state.lang);
+            updateLang();
+        });
+
+        const themeOptions = [
+            {value: 'auto', i18nKey: 'theme_auto'},
+            {value: 'light', i18nKey: 'theme_light'},
+            {value: 'dark', i18nKey: 'theme_dark'}
+        ];
+
+        const themeSelect = new CustomSelect('themeSelectWrapper', themeOptions, state.theme, (val) => {
+            state.theme = val;
+            localStorage.setItem('ble_theme', state.theme);
+            updateTheme();
+        });
+
+        const deviceSelect = new CustomSelect('deviceSelectWrapper', [{value: '', i18nKey: 'select_device'}], '', (val) => {
+             // Device selected
+             connectBtn.disabled = !val;
+        });
+
+        const historyPeriodOptions = [
+            {value: 'raw', i18nKey: 'period_minute'},
+            {value: 'minute', i18nKey: 'period_minute_avg'},
+            {value: 'hour', i18nKey: 'period_hour'},
+            {value: 'day', i18nKey: 'period_day'}
+        ];
+
+        const historyPeriodSelect = new CustomSelect('historyPeriodSelectWrapper', historyPeriodOptions, 'raw', (val) => {
+             updateHistoryChart(val);
+        });
+
+        function getSystemLang() {
+            const lang = navigator.language;
+            if (lang.toLowerCase() === 'zh-cn' || lang.toLowerCase() === 'zh-hans') return 'zh-CN';
+            if (lang.startsWith('zh')) return 'zh-TW';
+            return 'en';
+        }
+
+        function updateLang() {
+            let lang = state.lang;
+            if (lang === 'auto') {
+                lang = getSystemLang();
+            }
+            state.currentLang = lang;
+            
+            // Fallback to en if lang not supported
+            if (!translations[lang]) lang = 'en';
+            
+            const t = translations[lang];
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (t[key]) {
+                    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                        el.placeholder = t[key];
+                    } else {
+                        el.textContent = t[key];
+                    }
+                }
+            });
+
+            // Update specific dynamic texts if needed (handled in logic)
+            updateStatusText();
+        }
+
+        function updateTheme() {
+            let theme = state.theme;
+            if (theme === 'auto') {
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    theme = 'dark';
+                } else {
+                    theme = 'light';
+                }
+            }
+            
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+            
+            // Update Chart.js colors
+            updateChartTheme(theme);
+        }
+
+        function updateChartTheme(theme) {
+            if (typeof historyChart === 'undefined') return;
+            const isDark = theme === 'dark';
+            const color = isDark ? '#cbd5e1' : '#334155'; // slate-300 : slate-700
+            const gridColor = isDark ? '#475569' : '#e2e8f0'; // slate-600 : slate-200
+            
+            historyChart.options.scales.x.grid.color = gridColor;
+            historyChart.options.scales.y.grid.color = gridColor;
+            historyChart.options.scales.x.ticks.color = color;
+            historyChart.options.scales.y.ticks.color = color;
+            historyChart.update();
+        }
+
+        // --- Charts ---
+        const historyCtx = document.getElementById('historyChart').getContext('2d');
+        
+        // Create gradient
+        let historyGradient = historyCtx.createLinearGradient(0, 0, 0, 400);
+        historyGradient.addColorStop(0, 'rgba(239, 68, 68, 0.5)');
+        historyGradient.addColorStop(1, 'rgba(239, 68, 68, 0.0)');
+
+        const historyChart = new Chart(historyCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Heart Rate (BPM)',
+                    data: [],
+                    borderColor: 'rgb(239, 68, 68)',
+                    backgroundColor: historyGradient,
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                        titleColor: '#f8fafc',
+                        bodyColor: '#f8fafc',
+                        borderColor: '#334155',
+                        borderWidth: 1,
+                        padding: 10,
+                        displayColors: false,
+                        callbacks: {
+                            label: function(context) {
+                                return `Heart Rate: ${context.parsed.y} BPM`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { 
+                        display: true,
+                        grid: { display: false },
+                        ticks: {
+                            maxTicksLimit: 8,
+                            maxRotation: 0,
+                            color: '#94a3b8'
+                        }
+                    },
+                    y: { 
+                        beginAtZero: false, 
+                        suggestedMin: 40, 
+                        suggestedMax: 120,
+                        grid: { color: '#e2e8f0' },
+                        ticks: { color: '#94a3b8' }
+                    }
+                },
+                animation: {
+                    duration: 750,
+                    easing: 'easeOutQuart'
+                },
+                interaction: { intersect: false, mode: 'nearest', axis: 'x' }
+            }
+        });
+
+
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (state.theme === 'auto') {
+                updateTheme();
+            }
+        });
+
+        updateLang();
+        updateTheme();
+
+        // --- WebSocket & State ---
+        let socket;
+        let currentBPM = 0;
+        let isConnected = false;
+        
+        // --- Helpers ---
+        function getT(key) {
+            let lang = state.currentLang;
+            if (!translations[lang]) lang = 'en';
+            return translations[lang][key] || key;
+        }
+
+        function updateStatusText() {
+             // For simple "Disconnected", "Connected", "Connecting...", we can translate.
+             // But complex error messages from backend will remain as is.
+             const currentText = statusDiv.textContent;
+             
+             // Try to map current known states (very basic)
+             if (currentText === 'Disconnected' || currentText === '未連接') {
+                 statusDiv.textContent = getT('status_disconnected');
+             }
+        }
+
+        // --- ECG Simulation ---
+        const ecgCanvas = document.getElementById('ecgCanvas');
+        const ecgCtx = ecgCanvas.getContext('2d');
+        let ecgData = [];
+        let ecgTime = 0;
+        let lastFrameTime = 0;
+        
+        function resizeCanvas() {
+            ecgCanvas.width = ecgCanvas.parentElement.clientWidth;
+            ecgCanvas.height = ecgCanvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawECG(timestamp) {
+            if (!lastFrameTime) lastFrameTime = timestamp;
+            const dt = (timestamp - lastFrameTime) / 1000;
+            lastFrameTime = timestamp;
+
+            // Clear canvas
+            ecgCtx.clearRect(0, 0, ecgCanvas.width, ecgCanvas.height);
+
+            // Simulation logic
+            if (currentBPM > 0) {
+                const bps = currentBPM / 60;
+                const period = 1 / bps;
+                ecgTime += dt;
+                
+                const phase = (ecgTime % period) / period;
+                let y = 0;
+
+                // Simple P-QRS-T wave synthesis
+                if (phase >= 0.0 && phase < 0.1) { // P wave
+                    y = 0.15 * Math.sin(Math.PI * (phase - 0.0) / 0.1);
+                } else if (phase >= 0.1 && phase < 0.15) { // PR segment
+                    y = 0;
+                } else if (phase >= 0.15 && phase < 0.2) { // Q
+                    y = -0.15 * (phase - 0.15) / 0.05;
+                } else if (phase >= 0.2 && phase < 0.25) { // R
+                    y = 1.0 * (phase - 0.2) / 0.05; // Spike up
+                } else if (phase >= 0.25 && phase < 0.3) { // S
+                    y = -0.3 * (phase - 0.25) / 0.05; // Spike down
+                } else if (phase >= 0.3 && phase < 0.45) { // ST segment
+                    y = 0;
+                } else if (phase >= 0.45 && phase < 0.7) { // T wave
+                    y = 0.25 * Math.sin(Math.PI * (phase - 0.45) / 0.25);
+                }
+
+                // Add to buffer
+                const centerY = ecgCanvas.height / 2;
+                const scaleY = ecgCanvas.height * 0.4;
+                
+                // Add point
+                ecgData.push(centerY - (y * scaleY));
+            } else {
+                // Flatline
+                ecgData.push(ecgCanvas.height / 2);
+            }
+
+            // Keep buffer size manageable (scrolling effect)
+            const maxPoints = ecgCanvas.width; // 1 pixel per point
+            if (ecgData.length > maxPoints) {
+                ecgData.shift();
+            }
+
+            // Draw line with gradient and glow
+            ecgCtx.beginPath();
+            
+            // Create gradient for the line (fade out on the left)
+            const gradient = ecgCtx.createLinearGradient(0, 0, ecgCanvas.width, 0);
+            gradient.addColorStop(0, 'rgba(239, 68, 68, 0)');
+            gradient.addColorStop(0.1, 'rgba(239, 68, 68, 0.5)');
+            gradient.addColorStop(0.8, 'rgba(239, 68, 68, 1)');
+            gradient.addColorStop(1, 'rgba(255, 100, 100, 1)'); // Bright tip
+
+            ecgCtx.strokeStyle = gradient;
+            ecgCtx.lineWidth = 2;
+            ecgCtx.lineJoin = 'round';
+            ecgCtx.lineCap = 'round';
+            
+            // Add glow effect
+            ecgCtx.shadowBlur = 10;
+            ecgCtx.shadowColor = 'rgba(239, 68, 68, 0.8)';
+
+            for (let i = 0; i < ecgData.length; i++) {
+                // Draw from right to left or left to right?
+                // ecgData[0] is oldest (left), ecgData[length-1] is newest (right)
+                const x = ecgCanvas.width - (ecgData.length - i);
+                if (i === 0) ecgCtx.moveTo(x, ecgData[i]);
+                else ecgCtx.lineTo(x, ecgData[i]);
+            }
+            ecgCtx.stroke();
+            
+            // Reset shadow for next frame (performance)
+            ecgCtx.shadowBlur = 0;
+
+            requestAnimationFrame(drawECG);
+        }
+        requestAnimationFrame(drawECG);
+
+        // --- History Chart Logic ---
+        async function updateHistoryChart(period) {
+            try {
+                const response = await fetch(`/api/history?period=${period}`);
+                const data = await response.json();
+                
+                // Helper to format labels
+                const formatLabel = (timestamp) => {
+                    const date = new Date(timestamp.replace(/-/g, '/')); // Fix for Safari/Firefox
+                    if (isNaN(date.getTime())) return timestamp; // Fallback
+                    
+                    if (period === 'raw') {
+                         return date.getHours().toString().padStart(2, '0') + ':' + 
+                                date.getMinutes().toString().padStart(2, '0') + ':' +
+                                date.getSeconds().toString().padStart(2, '0');
+                    }
+                    if (period === 'minute') {
+                         // HH:MM
+                         return date.getHours().toString().padStart(2, '0') + ':' + 
+                                date.getMinutes().toString().padStart(2, '0');
+                    }
+                    if (period === 'hour') {
+                         return date.getHours().toString().padStart(2, '0') + ':00';
+                    }
+                    if (period === 'day') {
+                         return (date.getMonth() + 1).toString().padStart(2, '0') + '-' + 
+                                date.getDate().toString().padStart(2, '0');
+                    }
+                    return timestamp;
+                };
+
+                const labels = data.map(d => formatLabel(d.timestamp));
+                const values = data.map(d => d.value);
+
+                historyChart.data.labels = labels;
+                historyChart.data.datasets[0].data = values;
+                historyChart.update();
+            } catch (err) {
+                console.error('Failed to fetch history:', err);
+            }
+        }
+
+        // --- WebSocket Logic ---
+        function initWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            socket.onopen = () => {
+                console.log('WebSocket connected');
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'heart_rate') {
+                    const bpm = data.value;
+                    updateBPM(bpm);
+                } else if (data.type === 'status') {
+                    // Update status with translation if possible
+                    if (data.message === 'Disconnected') {
+                        statusDiv.textContent = getT('status_disconnected');
+                    } else if (data.message.startsWith('Connecting to')) {
+                        statusDiv.textContent = getT('status_connecting');
+                    } else if (data.message.startsWith('Connected to')) {
+                        statusDiv.textContent = getT('status_connected');
+                    } else {
+                        statusDiv.textContent = data.message;
+                    }
+                    
+                    if (data.message.includes("Connected to")) {
+                        setConnectedState(true);
+                    } else if (data.message.includes("Disconnected")) {
+                        setConnectedState(false);
+                    }
+                } else if (data.type === 'error') {
+                    console.error('Server error:', data.message);
+                    statusDiv.textContent = `${getT('error_prefix')}${data.message}`;
+                    setConnectedState(false);
+                }
+            };
+
+            socket.onclose = () => {
+                console.log('WebSocket disconnected. Reconnecting...');
+                statusDiv.textContent = getT('conn_lost');
+                setTimeout(initWebSocket, 3000);
+            };
+        }
+
+        initWebSocket();
+
+        // --- App Logic ---
+        function updateBPM(bpm) {
+            currentBPM = bpm;
+            bpmValueSpan.textContent = bpm;
+            
+            // Pulse animation
+            bpmAnimation.style.opacity = '1';
+            setTimeout(() => bpmAnimation.style.opacity = '0', 150);
+
+            // If we are in 'minute' mode (real-time-ish), update the chart?
+            // Actually, the user asked for history chart to view history.
+            // Let's decide: if history mode is 'minute', maybe we append?
+            // Or just refresh every X seconds?
+            // For now, let's just refresh if mode is 'minute'.
+            if (historyPeriodSelect.value === 'minute') {
+                // Throttle updates? Or just fetch again?
+                // Fetching again is safest but heavy.
+                // Let's just append to local if it's the latest minute.
+                // Simpler: Just refresh history every 5 seconds if window is active?
+            }
+        }
+        
+        // Auto-refresh history every 5s if in raw or minute mode
+        setInterval(() => {
+            const val = historyPeriodSelect.value;
+            if (val === 'raw' || val === 'minute') {
+                updateHistoryChart(val);
+            }
+        }, 5000);
+
+        // Initial load
+        updateHistoryChart('raw');
+
+        function setConnectedState(connected) {
+            isConnected = connected;
+            if (connected) {
+                connectBtn.classList.add('hidden');
+                disconnectBtn.classList.remove('hidden');
+                deviceSelect.disabled = true;
+                scanBtn.disabled = true;
+            } else {
+                connectBtn.classList.remove('hidden');
+                disconnectBtn.classList.add('hidden');
+                deviceSelect.disabled = false;
+                scanBtn.disabled = false;
+                currentBPM = 0;
+                bpmValueSpan.textContent = '--';
+            }
+        }
+
+        scanBtn.addEventListener('click', async () => {
+            scanBtn.textContent = getT('scan_scanning');
+            scanBtn.disabled = true;
+            
+            // Show scanning state
+            deviceSelect.setOptions([{value: '', i18nKey: 'scan_scanning'}]);
+            deviceSelect.select('');
+            
+            try {
+                const response = await fetch('/scan');
+                const devices = await response.json();
+                
+                // Build options
+                const newOptions = [{value: '', i18nKey: 'select_device'}];
+                devices.forEach(device => {
+                    newOptions.push({
+                        value: device.address,
+                        label: `${device.name || 'Unknown'} (${device.address})`
+                    });
+                });
+                
+                deviceSelect.setOptions(newOptions);
+                deviceSelect.select('');
+            } catch (err) {
+                console.error('Scan failed', err);
+                deviceSelect.setOptions([{value: '', i18nKey: 'scan_failed'}]);
+                deviceSelect.select('');
+            } finally {
+                scanBtn.textContent = getT('btn_scan');
+                scanBtn.disabled = false;
+            }
+        });
+
+
+        connectBtn.addEventListener('click', () => {
+            const address = deviceSelect.value;
+            if (!address) return;
+            
+            socket.send(JSON.stringify({
+                action: 'connect',
+                address: address
+            }));
+            
+            connectBtn.textContent = getT('status_connecting');
+            connectBtn.disabled = true;
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            socket.send(JSON.stringify({
+                action: 'disconnect'
+            }));
+        });
+
+    </script>
+</body>
+</html>
